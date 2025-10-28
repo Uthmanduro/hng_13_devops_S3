@@ -1,0 +1,62 @@
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - '8080:80'
+    volumes:
+      - ./generate-nginx-config.sh:/docker-entrypoint.d/40-generate-config.sh:ro
+
+    environment:
+      - ACTIVE_POOL=${ACTIVE_POOL:-blue}
+    depends_on:
+      - app_blue
+      - app_green
+    restart: unless-stopped
+
+  app_blue:
+    image: ${BLUE_IMAGE}
+    ports:
+      - '8081:${PORT:-3000}'
+    environment:
+      - APP_POOL=blue
+      - RELEASE_ID=${RELEASE_ID_BLUE}
+      - PORT=${PORT:-3000}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--quiet',
+          '--tries=1',
+          '--spider',
+          'http://localhost:${PORT:-3000}/healthz',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  app_green:
+    image: ${GREEN_IMAGE}
+    ports:
+      - '8082:${PORT:-3000}'
+    environment:
+      - APP_POOL=green
+      - RELEASE_ID=${RELEASE_ID_GREEN}
+      - PORT=${PORT:-3000}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--quiet',
+          '--tries=1',
+          '--spider',
+          'http://localhost:${PORT:-3000}/healthz',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s

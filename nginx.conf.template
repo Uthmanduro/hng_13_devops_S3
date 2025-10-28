@@ -1,0 +1,43 @@
+upstream backend {
+    # Primary server - determined by ACTIVE_POOL env var
+    # max_fails=1 with short fail_timeout ensures quick failover detection
+    server app_blue:3000 max_fails=1 fail_timeout=5s;
+    server app_green:3000 backup max_fails=1 fail_timeout=5s;
+}
+
+server {
+    listen 80;
+    server_name localhost;
+
+    # Aggressive timeouts for rapid failover detection
+    proxy_connect_timeout 2s;
+    proxy_send_timeout 3s;
+    proxy_read_timeout 3s;
+
+    # Retry configuration
+    # Retry on: connection errors, timeouts, and all 5xx server errors
+    proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+    proxy_next_upstream_tries 2;
+    proxy_next_upstream_timeout 10s;
+
+    location / {
+        proxy_pass http://backend;
+        
+        # Preserve original request headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Critical: Ensure application headers pass through to clients
+        proxy_pass_header X-App-Pool;
+        proxy_pass_header X-Release-Id;
+        
+        # Disable buffering for faster failover response
+        proxy_buffering off;
+        
+        # Use HTTP/1.1 for keepalive connections
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+}
