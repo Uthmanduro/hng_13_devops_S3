@@ -1,7 +1,7 @@
 #!/bin/bash
 
-echo "🧪 Testing Error Rate Alert"
-echo "=============================="
+echo "🧪 Testing Error Rate Alert (Improved Method)"
+echo "=============================================="
 echo ""
 
 # Check current configuration
@@ -20,49 +20,69 @@ echo "- Need > $THRESHOLD% errors in $WINDOW requests"
 echo "- That's at least $ERRORS_NEEDED errors out of $WINDOW requests"
 echo ""
 
-# First, make sure we have a healthy baseline
-echo "Step 1: Ensuring blue pool is running..."
+echo "Step 1: Ensuring both pools are running..."
 docker start hng_13_devops_s3-app_blue-1 2>/dev/null
+docker start hng_13_devops_s3-app_green-1 2>/dev/null
 sleep 3
+echo "✓ Both pools running"
+echo ""
 
-echo "Step 2: Generating baseline successful requests (first 100)..."
+echo "Step 2: Generating baseline successful requests (100 requests)..."
 for i in {1..100}; do 
   curl -s http://localhost:8080/ > /dev/null 2>&1
 done
 echo "✓ Baseline complete"
 echo ""
 
-echo "Step 3: Pausing blue container to force errors..."
-docker exec hng_13_devops_s3-app_blue-1 kill -SIGSTOP 1
-echo "✓ Blue container paused"
+echo "Step 3: STOPPING BOTH pools to force 502 errors..."
+docker stop hng_13_devops_s3-app_blue-1
+docker stop hng_13_devops_s3-app_green-1
+sleep 2
+echo "✓ Both pools stopped"
 echo ""
 
-echo "Step 4: Generating error traffic (150 requests to trigger errors)..."
-for i in {1..150}; do 
-  curl -s --max-time 5 http://localhost:8080/ > /dev/null 2>&1
+echo "Step 4: Generating 502 error traffic (120 requests)..."
+for i in {1..120}; do 
+  curl -s --max-time 2 http://localhost:8080/ > /dev/null 2>&1
   if [ $((i % 20)) -eq 0 ]; then
-    echo "  - Sent $i requests..."
+    echo "  - Sent $i error requests..."
   fi
 done
 echo "✓ Error traffic complete"
 echo ""
 
-echo "Step 5: Resuming blue container..."
-docker exec hng_13_devops_s3-app_blue-1 kill -SIGCONT 1
-echo "✓ Blue container resumed"
+echo "Step 5: Restarting both pools..."
+docker start hng_13_devops_s3-app_blue-1
+docker start hng_13_devops_s3-app_green-1
+sleep 5
+echo "✓ Pools restarted"
 echo ""
 
-echo "Step 6: Checking watcher logs..."
+echo "Step 6: Checking watcher logs for error detection..."
 echo "=============================="
-docker logs hng_13_devops_s3-alert_watcher-1 | tail -20
+docker logs hng_13_devops_s3-alert_watcher-1 | grep -E "\[ERROR\]|\[INFO\] Error rate|\[ALERT\]" | tail -30
 echo ""
 
-echo "Step 7: Checking Nginx error log..."
+echo "Step 7: Checking recent Nginx logs for 502 errors..."
 echo "=============================="
-docker exec hng_13_devops_s3-nginx-1 tail -5 /var/log/nginx/error.log 2>/dev/null || echo "No errors in nginx log"
+docker exec hng_13_devops_s3-nginx-1 grep "upstream_status=502" /var/log/nginx/access.log | tail -5
+echo ""
+
+echo "Step 8: Checking if alert was sent to Slack..."
+echo "=============================="
+docker logs hng_13_devops_s3-alert_watcher-1 | grep "SLACK"
 echo ""
 
 echo "✅ Test complete!"
 echo ""
-echo "Expected: You should see a high error rate alert in Slack"
-echo "If not, check watcher logs above for [ERROR] or error rate calculations"
+echo "Expected: You should see:"
+echo "  1. Multiple [ERROR] 5xx detected lines in watcher logs"
+echo "  2. [INFO] Error rate showing > 2%"
+echo "  3. [ALERT] High error rate alert sent"
+echo "  4. [SLACK] Alert sent: high_error_rate"
+echo "  5. Slack message in your channel"
+echo ""
+echo "If no alert was sent, check:"
+echo "  - Error rate may not have exceeded threshold (check [INFO] Error rate lines)"
+echo "  - Alert may be in cooldown period (300 seconds by default)"
+

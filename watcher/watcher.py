@@ -26,12 +26,12 @@ last_pool: Optional[str] = None
 request_window = deque(maxlen=WINDOW_SIZE)
 last_alert_times: Dict[str, float] = {}
 
-# Log parsing regex
+# Log parsing regex - handles pool=blue, pool=green, or pool=-
 LOG_PATTERN = re.compile(
-    r'pool=(?P<pool>\w+)\s+'
+    r'pool=(?P<pool>[\w\-]+)\s+'
     r'release=(?P<release>[\w\-\.]+)\s+'
     r'upstream_status=(?P<upstream_status>\d+)\s+'
-    r'upstream=(?P<upstream>[\d\.:]+)\s+'
+    r'upstream=(?P<upstream>[\w\d\.\:]+)\s+'
     r'request_time=(?P<request_time>[\d\.]+)\s+'
     r'upstream_response_time=(?P<upstream_response_time>[\d\.]+)'
 )
@@ -95,6 +95,10 @@ def check_error_rate():
     total_count = len(request_window)
     error_rate = (error_count / total_count) * 100
     
+    # Debug: log error rate periodically
+    if total_count % 50 == 0:
+        print(f"[INFO] Error rate: {error_rate:.2f}% ({error_count}/{total_count}), Threshold: {ERROR_RATE_THRESHOLD}%")
+    
     if error_rate > ERROR_RATE_THRESHOLD:
         message = (
             f"⚠️ *High Error Rate Detected*\n"
@@ -104,6 +108,7 @@ def check_error_rate():
             f"• Action Required: Check upstream application health"
         )
         send_slack_alert(message, "high_error_rate", "critical")
+        print(f"[ALERT] High error rate alert sent: {error_rate:.2f}%")
 
 
 def check_failover(current_pool: str):
@@ -171,10 +176,12 @@ def tail_logs():
     with open(LOG_FILE, 'r', buffering=1) as f:
         # Read existing content first (catch up)
         print(f"[INFO] Reading existing log entries...")
+        line_count = 0
         for line in f:
+            line_count += 1
             process_line(line)
         
-        print(f"[INFO] Caught up, now monitoring live...")
+        print(f"[INFO] Processed {line_count} existing lines. Now monitoring live...")
         
         # Now follow new lines
         while True:
@@ -189,10 +196,21 @@ def tail_logs():
 
 def process_line(line: str):
     """Process a single log line"""
+    # Debug: print raw line occasionally
+    if len(request_window) % 10 == 0 and len(request_window) < 50:
+        print(f"[DEBUG] Sample log line: {line[:200]}")
+    
     # Parse log line
     log_data = parse_log_line(line)
     if not log_data:
+        # Debug: show why parsing failed
+        if 'pool=' in line:
+            print(f"[WARN] Line contains 'pool=' but failed to parse: {line[:150]}")
         return
+    
+    # Debug: show successful parse
+    if len(request_window) < 5:
+        print(f"[DEBUG] Parsed: pool={log_data['pool']}, status={log_data['upstream_status']}")
     
     # Track request status
     request_window.append(log_data['upstream_status'])
