@@ -5,7 +5,7 @@ services:
       - '8080:80'
     volumes:
       - ./generate-nginx-config.sh:/docker-entrypoint.d/40-generate-config.sh:ro
-
+      - nginx-logs:/var/log/nginx
     environment:
       - ACTIVE_POOL=${ACTIVE_POOL:-blue}
     depends_on:
@@ -60,3 +60,24 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+
+  alert_watcher:
+    build:
+      context: ./watcher
+      dockerfile: Dockerfile
+    volumes:
+      - nginx-logs:/logs:ro
+      - ./watcher:/app
+    environment:
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - ERROR_RATE_THRESHOLD=${ERROR_RATE_THRESHOLD:-2}
+      - WINDOW_SIZE=${WINDOW_SIZE:-200}
+      - ALERT_COOLDOWN_SEC=${ALERT_COOLDOWN_SEC:-300}
+      - MAINTENANCE_MODE=${MAINTENANCE_MODE:-false}
+      - LOG_FILE=/logs/access.log
+    depends_on:
+      - nginx
+    restart: unless-stopped
+
+volumes:
+  nginx-logs:
